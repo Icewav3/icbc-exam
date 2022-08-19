@@ -5,6 +5,16 @@ As you know, there is a massive problem with lookup appointment free slots for t
 In my case, I found an appointment in 4 months. 
 So I decided to automate the process, and after two hours, I found an appointment in a week.
 
+Let's start with coffee :)
+If you like what I'm doing, you can buy a coffee for me: https://www.buymeacoffee.com/ZanMax
+
+There are 3 version:
+
+- UI
+- Python console
+- Golang console
+
+
 ## Running
 #### UI
 ##### Install necessary packages
