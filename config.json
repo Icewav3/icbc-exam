@@ -1,5 +1,8 @@
 {
   "LastName": "",
   "LicenceNumber": "",
-  "Keyword": ""
+  "Keyword": "",
+  "Class": 5,
+  "AfterDate": "2022-09-01",
+  "BeforeDate": "2022-10-01"
 }
