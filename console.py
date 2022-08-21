@@ -1,12 +1,7 @@
 import json
+from datetime import datetime
 
 import requests as requests
-
-expactAfterDate = "2022-02-01"  # YYYY-MM-DD
-expactBeforeDate = "2022-08-15"  # YYYY-MM-DD
-expactAfterTime = "09:00"  # HH:MM
-expactBeforeTime = "11:30"  # HH:MM
-examClass = 5  # 5 or 7
 
 headers = {'Content-type': 'application/json',
            'Accept': 'application/json, text/plain, */*',
@@ -38,14 +33,13 @@ def get_token(last_name, license_id, code):
     return "error"
 
 
-"""
-def get_appointments(token):
+def get_appointments(token, last_name, license_id, exam_class, after_date):
     appointment_url = "https://onlinebusiness.icbc.com/deas-api/v1/web/getAvailableAppointments"
     headers['Authorization'] = token
     point_grey = {
         "aPosID": 9,
-        "examType": str(examClass) + "-R-1",
-        "examDate": expactAfterDate,
+        "examType": str(exam_class) + "-R-1",
+        "examDate": after_date,
         "ignoreReserveTime": "false",
         "prfDaysOfWeek": "[0,1,2,3,4,5,6]",
         "prfPartsOfDay": "[0,1]",
@@ -58,11 +52,21 @@ def get_appointments(token):
         return response.json()
     print('Authorization Error')
     return []
-"""
+
 
 if __name__ == "__main__":
     configs = load_config()
+    date_format = "%Y-%m-%d"
     auth_token = get_token(configs['LastName'], configs['LicenceNumber'], configs['Keyword'])
-    print(auth_token)
-    # appointments = get_appointments(auth_token)
-    # print(appointments)
+    if auth_token != "error":
+        while True:
+            appointments = get_appointments(auth_token, configs['LastName'], configs['LicenceNumber'], configs['Class'],
+                                            configs['AfterDate'])
+
+            after = datetime.strptime(configs['AfterDate'], date_format)
+            before = datetime.strptime(configs['BeforeDate'], date_format)
+
+            for appointment in appointments:
+                check = datetime.strptime(appointment['appointmentDt']['date'], date_format)
+                if after <= check <= before:
+                    print("Found")
