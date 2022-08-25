@@ -70,6 +70,12 @@ func login(LastName, LicenceNumber, Keyword string) string {
 		return ""
 	}
 }
+
+func getAppointments(token, last_name, license_id, exam_class, after_date string) []string {
+	
+}
+
+
 func main() {
 	conf := loadConfig("config.json")
 
