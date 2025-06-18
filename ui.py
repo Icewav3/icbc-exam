@@ -141,6 +141,7 @@ def click_department(dept_elem):
         except Exception:
             return False
     return True
+
 def reopen_location_search():
     loc_inp = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.ID, "mat-input-3")))
     loc_inp.clear(); slow_type(loc_inp, location_query); debug_wait("typed city")
@@ -149,15 +150,72 @@ def reopen_location_search():
         EC.element_to_be_clickable((By.XPATH, "/html/body/div[2]/div/div/mat-dialog-container/app-search-modal/div/div/form/div[2]/button"))
     ).click(); debug_wait("search")
 
-print("[INFO] Sniping loop… press Ctrl+C to stop")
-# ---------- main flow ----------
+def safe_get_element_text(element):
+    """Safely get text from element, handling stale references."""
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            return element.text.strip()
+        except StaleElementReferenceException:
+            if attempt < max_retries - 1:
+                print(f"[WARN] Stale element on attempt {attempt + 1}, retrying...")
+                time.sleep(0.5)
+                continue
+            else:
+                print("[ERROR] Element became stale after all retries")
+                return None
+        except Exception as e:
+            print(f"[ERROR] Error getting element text: {e}")
+            return None
+
+def check_available_slots():
+    """Check for available slots in the current view, handling stale elements."""
+    try:
+        # Re-find slots each time to avoid stale references
+        slots = driver.find_elements(By.CLASS_NAME, "date-title")
+        
+        if not slots:
+            print("[DEBUG] No slots found in current view")
+            return
+            
+        print(f"[DEBUG] Found {len(slots)} slot elements")
+        
+        for i, slot in enumerate(slots):
+            try:
+                # Get text safely
+                txt = safe_get_element_text(slot)
+                if txt is None:
+                    continue
+                    
+                print(f"[DEBUG] Slot {i+1}: {txt}")
+                
+                try:
+                    dt_obj = parser.parse(txt)
+                    d, t = dt_obj.date(), dt_obj.time()
+                    
+                    if ((AFTER_DATE is None or d >= AFTER_DATE) and
+                        (BEFORE_DATE is None or d <= BEFORE_DATE) and
+                        (AFTER_TIME is None or t >= AFTER_TIME) and
+                        (BEFORE_TIME is None or t <= BEFORE_TIME)):
+                        print("✅", dt_obj)
+                        
+                except Exception as parse_error:
+                    print(f"[WARN] Could not parse date/time from '{txt}': {parse_error}")
+                    continue
+                    
+            except Exception as e:
+                print(f"[WARN] Error processing slot {i+1}: {e}")
+                continue
+                
+    except Exception as e:
+        print(f"[ERROR] Error in check_available_slots: {e}")
+
 print("[INFO] Opening ICBC portal …")
 driver.get(url)
 wait_footer()
 driver.maximize_window(); debug_wait("maximize")
 
 driver.execute_script("window.scrollTo(0, document.body.scrollHeight)")
-
 debug_wait("scroll to bottom")
 
 # Begin booking
@@ -192,47 +250,70 @@ WebDriverWait(driver, 20).until(
 print("[INFO] Sniping loop… press Ctrl+C to stop")
 
 while True:
-    dismiss_feedback_popup()
+    try:
+        dismiss_feedback_popup()
 
-    first_office = driver.find_elements(By.XPATH, "//div[contains(@class, 'first-office-container')]//div[contains(@class, 'background-highlight')]")
-    other_offices = driver.find_elements(By.XPATH, "//div[contains(@class, 'other-locations-container')]//div[contains(@class, 'background-highlight')]")
-    department_cards = first_office + other_offices
+        # Re-find department cards each iteration to avoid stale references
+        first_office = driver.find_elements(By.XPATH, "//div[contains(@class, 'first-office-container')]//div[contains(@class, 'background-highlight')]")
+        other_offices = driver.find_elements(By.XPATH, "//div[contains(@class, 'other-locations-container')]//div[contains(@class, 'background-highlight')]")
+        department_cards = first_office + other_offices
 
-    print("[DEBUG] found", len(department_cards), "department cards")
+        print("[DEBUG] found", len(department_cards), "department cards")
 
-    for idx, dept in enumerate(department_cards):
-        try:
-            title = dept.find_element(By.CLASS_NAME, "department-title").text.lower().strip()
-        except Exception:
-            continue
-
-        # if not title.startswith("richmond"):
-        #     continue
-
-        print(f"[DEBUG] trying card {idx+1}/{len(department_cards)}: {title}")
-
-        if not click_department(dept):
-            print(f"[WARN] failed to open card {idx+1}")
-            continue
-
-        debug_wait(f"opened {title[:40]}…")
-
-        for slot in driver.find_elements(By.CLASS_NAME, "date-title"):
-            txt = slot.text.strip()
+        for idx in range(len(department_cards)):
             try:
-                dt_obj = parser.parse(txt)
-            except Exception:
+                # Re-find the department cards to avoid stale references
+                first_office = driver.find_elements(By.XPATH, "//div[contains(@class, 'first-office-container')]//div[contains(@class, 'background-highlight')]")
+                other_offices = driver.find_elements(By.XPATH, "//div[contains(@class, 'other-locations-container')]//div[contains(@class, 'background-highlight')]")
+                current_cards = first_office + other_offices
+                
+                if idx >= len(current_cards):
+                    print(f"[WARN] Card {idx+1} no longer exists, skipping")
+                    continue
+                    
+                dept = current_cards[idx]
+                
+                try:
+                    title = dept.find_element(By.CLASS_NAME, "department-title").text.lower().strip()
+                except Exception:
+                    print(f"[WARN] Could not get title for card {idx+1}")
+                    continue
+
+                print(f"[DEBUG] trying card {idx+1}/{len(current_cards)}: {title}")
+
+                if not click_department(dept):
+                    print(f"[WARN] failed to open card {idx+1}")
+                    continue
+
+                debug_wait(f"opened {title[:40]}…")
+
+                # Check for available slots using the safe method
+                check_available_slots()
+
+                # Wait for user to manually close details or reset list
+                print(f"[DEBUG] done with card {idx+1}")
+                time.sleep(2)
+
+            except StaleElementReferenceException:
+                print(f"[WARN] Stale element reference for card {idx+1}, continuing to next card")
                 continue
-            d, t = dt_obj.date(), dt_obj.time()
-            if ((AFTER_DATE is None or d >= AFTER_DATE) and
-                (BEFORE_DATE is None or d <= BEFORE_DATE) and
-                (AFTER_TIME is None or t >= AFTER_TIME) and
-                (BEFORE_TIME is None or t <= BEFORE_TIME)):
-                print("✅", dt_obj, "-", title)
+            except Exception as e:
+                print(f"[ERROR] Error processing card {idx+1}: {e}")
+                continue
 
-        # Wait for user to manually close details or reset list
-        print("[DEBUG] done with card", idx+1)
         time.sleep(2)
+        
+    except KeyboardInterrupt:
+        print("\n[INFO] Stopping script...")
+        break
+    except Exception as e:
+        print(f"[ERROR] Unexpected error in main loop: {e}")
+        time.sleep(5)  # Wait before retrying
+        continue
 
-    time.sleep(2)
-
+    finally:
+        try:
+            driver.quit()
+            print("[INFO] Browser closed")
+        except:
+            pass
