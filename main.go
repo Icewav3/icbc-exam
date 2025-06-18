@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
+
+	"github.com/joho/godotenv"
 )
 
 const (
@@ -13,76 +16,51 @@ const (
 	appointmentsURL = "https://onlinebusiness.icbc.com/deas-api/v1/web/getAvailableAppointments"
 )
 
-type Login struct {
+type loginBody struct {
 	LastName      string `json:"drvrLastName"`
 	LicenceNumber string `json:"licenceNumber"`
 	Keyword       string `json:"keyword,omitempty"`
 }
 
-type Config struct {
-	LastName      string `json:"LastName"`
-	LicenceNumber string `json:"LicenceNumber"`
-	Keyword       string `json:"Keyword"`
+func mustEnv(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		log.Fatalf("missing env %s", key)
+	}
+	return v
 }
 
-func loadConfig(configPath string) Config {
-	var config Config
-	var configFile, err = os.Open(configPath)
-	defer configFile.Close()
+func login() string {
+	body := loginBody{
+		LastName:      mustEnv("ICBC_LASTNAME"),
+		LicenceNumber: mustEnv("ICBC_LICENCENUMBER"),
+		Keyword:       mustEnv("ICBC_KEYWORD"),
+	}
+	jsonBytes, _ := json.Marshal(body)
 
+	req, _ := http.NewRequest(http.MethodPut, loginURL, bytes.NewBuffer(jsonBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
-	jsonParser := json.NewDecoder(configFile)
-	jsonParser.Decode(&config)
-	return config
-}
+	defer resp.Body.Close()
 
-func login(LastName, LicenceNumber, Keyword string) string {
-	login := Login{
-		LastName:      LastName,
-		LicenceNumber: LicenceNumber,
-		Keyword:       Keyword,
-	}
-	client := &http.Client{}
-
-	loginJson, err := json.Marshal(login)
-	if err != nil {
-		panic(err)
-	}
-
-	req, err := http.NewRequest(http.MethodPut, loginURL, bytes.NewBuffer(loginJson))
-	if err != nil {
-		panic(err)
-	}
-	req.Header.Set("Content-type", "application/json")
-	req.Header.Set("Accept", "application/json, text/plain, */*")
-	req.Header.Set("Referer", "https://onlinebusiness.icbc.com/webdeas-ui/login;type=driver")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		panic(err)
-	}
 	if resp.StatusCode == 200 {
 		return resp.Header.Get("Authorization")
-	} else {
-		return ""
 	}
+	return ""
 }
-
-func getAppointments(token, last_name, license_id, exam_class, after_date string) []string {
-	
-}
-
 
 func main() {
-	conf := loadConfig("config.json")
+	_ = godotenv.Load()
 
-	token := login(conf.LastName, conf.LicenceNumber, conf.Keyword)
-	if token != "" {
-		fmt.Println("Get appointments")
-	} else {
-		fmt.Println("Auth error")
+	token := login()
+	if token == "" {
+		log.Fatal("auth failed")
 	}
+	fmt.Println("Auth OK, token:", token[:10], "…")
+	// TODO: call appointmentsURL
 }
