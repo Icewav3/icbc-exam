@@ -50,6 +50,51 @@ service = Service(driver_bin)
 driver = webdriver.Chrome(service=service)
 
 # ---------- helpers ----------
+def pick_slot_and_review():
+    """Choose the first slot that matches .env filters and click Review Appointment.
+       Returns True if a slot was booked, False otherwise."""
+    for date_hdr in driver.find_elements(By.CLASS_NAME, "date-title"):
+        try:
+            day = parser.parse(date_hdr.text).date()
+        except Exception:
+            continue
+        if AFTER_DATE and day < AFTER_DATE:   continue
+        if BEFORE_DATE and day > BEFORE_DATE: continue
+
+        # times for this date are the sibling buttons that follow the heading
+        time_buttons = date_hdr.find_elements(
+            By.XPATH, "./following-sibling::div//button[not(@disabled)]"
+        )
+        for btn in time_buttons:
+            try:
+                t_obj = parser.parse(btn.text.strip()).time()
+            except Exception:
+                continue
+            if AFTER_TIME and t_obj < AFTER_TIME:   continue
+            if BEFORE_TIME and t_obj > BEFORE_TIME:  continue
+
+            # -> valid slot: click it and confirm
+            btn.click(); debug_wait(f"picked {day} {t_obj}")
+            review_btn = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(.,'Review Appointment')]"))
+            )
+            review_btn.click(); debug_wait("clicked Review Appointment")
+            print(f"🎉  BOOKED {day} {t_obj}")
+            return True
+    return False
+
+
+def go_back_to_list():
+    """Return from the details view to the list view."""
+    try:
+        back = WebDriverWait(driver, 8).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label='Back']"))
+        )
+        back.click()
+        debug_wait("back to list")
+    except TimeoutException:
+        driver.back()          # fallback
+        debug_wait("driver.back()")
 
 def debug_wait(msg=""):
     """Sleep only when DEBUG is true, with a label."""
@@ -96,7 +141,15 @@ def click_department(dept_elem):
         except Exception:
             return False
     return True
+def reopen_location_search():
+    loc_inp = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.ID, "mat-input-3")))
+    loc_inp.clear(); slow_type(loc_inp, location_query); debug_wait("typed city")
+    loc_inp.send_keys(Keys.ENTER)
+    WebDriverWait(driver, 20).until(
+        EC.element_to_be_clickable((By.XPATH, "/html/body/div[2]/div/div/mat-dialog-container/app-search-modal/div/div/form/div[2]/button"))
+    ).click(); debug_wait("search")
 
+print("[INFO] Sniping loop… press Ctrl+C to stop")
 # ---------- main flow ----------
 print("[INFO] Opening ICBC portal …")
 driver.get(url)
@@ -112,7 +165,6 @@ WebDriverWait(driver, 20).until(
     EC.element_to_be_clickable((By.XPATH, "/html/body/app-root/app-home/mat-card/div[3]/div[3]/button"))
 ).click(); debug_wait("clicked book btn")
 
-# Login inputs
 inputs = {
     "last name": ("/html/body/app-root/app-login/mat-card/mat-card-content/form/span[1]/div/div[1]/div/mat-form-field/div/div[1]/div[3]/input", last_name),
     "licence":   ("/html/body/app-root/app-login/mat-card/mat-card-content/form/span[1]/div/div[2]/div/mat-form-field/div/div[1]/div[3]/input", license_id),
@@ -141,24 +193,30 @@ print("[INFO] Sniping loop… press Ctrl+C to stop")
 
 while True:
     dismiss_feedback_popup()
-    department_cards = driver.find_elements(By.CLASS_NAME, "department-container")
 
-    for dept in department_cards:
+    first_office = driver.find_elements(By.XPATH, "//div[contains(@class, 'first-office-container')]//div[contains(@class, 'background-highlight')]")
+    other_offices = driver.find_elements(By.XPATH, "//div[contains(@class, 'other-locations-container')]//div[contains(@class, 'background-highlight')]")
+    department_cards = first_office + other_offices
+
+    print("[DEBUG] found", len(department_cards), "department cards")
+
+    for idx, dept in enumerate(department_cards):
         try:
             title = dept.find_element(By.CLASS_NAME, "department-title").text.lower().strip()
         except Exception:
             continue
 
-        # We accept both Richmond offices (Elmbridge Way + Lansdowne)
-        if not title.startswith("richmond"):
+        # if not title.startswith("richmond"):
+        #     continue
+
+        print(f"[DEBUG] trying card {idx+1}/{len(department_cards)}: {title}")
+
+        if not click_department(dept):
+            print(f"[WARN] failed to open card {idx+1}")
             continue
 
-        if click_department(dept):
-            debug_wait(f"opened {title[:40]}…")
-        else:
-            continue
+        debug_wait(f"opened {title[:40]}…")
 
-        # Now parse date slots
         for slot in driver.find_elements(By.CLASS_NAME, "date-title"):
             txt = slot.text.strip()
             try:
@@ -172,4 +230,9 @@ while True:
                 (BEFORE_TIME is None or t <= BEFORE_TIME)):
                 print("✅", dt_obj, "-", title)
 
-    time.sleep(2)  # throttle loop
+        # Wait for user to manually close details or reset list
+        print("[DEBUG] done with card", idx+1)
+        time.sleep(2)
+
+    time.sleep(2)
+
